@@ -230,6 +230,8 @@ mod tests {
             preloaded: Arc::new(Mutex::new(None)),
             stream_completed_cache: Arc::new(Mutex::new(None)),
             stream_completed_spill: Arc::new(Mutex::new(None)),
+            stream_gen: Arc::new(AtomicU64::new(1)),
+            active_ranged_stream: Arc::new(Mutex::new(None)),
             current_is_seekable: Arc::new(AtomicBool::new(true)),
             stream_playback_armed: Arc::new(AtomicBool::new(true)),
             crossfade_enabled: Arc::new(AtomicBool::new(false)),

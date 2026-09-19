@@ -266,7 +266,7 @@ pub(crate) fn spawn_progress_task<E: ProgressEmitter>(
             let is_paused = paused_at.is_some();
 
             let pos_raw = if !stream_playback_armed.load(Ordering::Relaxed) {
-                0.0
+                paused_at.unwrap_or(0.0)
             } else if let Some(p) = paused_at {
                 p
             } else {

@@ -310,13 +310,14 @@ export function handleAudioProgress(
     setSeekFallbackVisualTarget(null);
     visualTarget = null;
   }
-  let displayTime = buffering ? 0 : current_time;
+  let displayTime = buffering ? (visualTarget?.seconds ?? store.currentTime) : current_time;
   if (visualTarget && visualTarget.trackId === track.id) {
     const nearTarget = Math.abs(current_time - visualTarget.seconds) <= 2.0;
-    if (nearTarget) {
+    if (nearTarget && !buffering) {
       setSeekFallbackVisualTarget(null);
       visualTarget = null;
-    } else if (Date.now() - visualTarget.setAtMs <= SEEK_FALLBACK_VISUAL_GUARD_MS) {
+      displayTime = current_time;
+    } else if (buffering || Date.now() - visualTarget.setAtMs <= SEEK_FALLBACK_VISUAL_GUARD_MS) {
       // Keep UI at the requested position while backend catches up.
       displayTime = visualTarget.seconds;
     } else {
@@ -342,7 +343,7 @@ export function handleAudioProgress(
     ) {
       emitPlaybackProgress({
         currentTime: displayTime,
-        progress: buffering ? 0 : progress,
+        progress,
         buffered: 0,
         buffering,
       });

@@ -59,7 +59,8 @@ export function runSeek(set: SetState, get: GetState, progress: number): void {
     // the seeked point instead of waiting for the next heartbeat.
     playbackReportSeek(time, s0.isPlaying);
     const sidSeek = getPlaybackServerId();
-    if (shouldRebindPlaybackToHotCache(s0.currentTrack.id, sidSeek)) {
+    const isStream = s0.currentPlaybackSource === 'stream';
+    if (isStream || shouldRebindPlaybackToHotCache(s0.currentTrack.id, sidSeek)) {
       setSeekFallbackVisualTarget({
         trackId: s0.currentTrack.id,
         seconds: time,
@@ -69,6 +70,7 @@ export function runSeek(set: SetState, get: GetState, progress: number): void {
       s0.playTrack(s0.currentTrack, undefined, true);
       return;
     }
+
     audioSeek({ seconds: time }).then(() => {
       // Arm stale-progress guard only after backend acknowledged seek.
       setSeekTarget(time);
@@ -111,9 +113,9 @@ export function runSeek(set: SetState, get: GetState, progress: number): void {
         setSeekFallbackTrackId(s.currentTrack.id);
         setSeekFallbackRestartAt(now);
         // Keep manual semantics (no crossfade) for seek recovery restarts.
-        s.playTrack(s.currentTrack, undefined, true);
+        // s.playTrack(s.currentTrack, undefined, true);
       }
-      scheduleSeekFallbackRetry(s.currentTrack.id, time);
+      // scheduleSeekFallbackRetry(s.currentTrack.id, time);
     });
   });
 }

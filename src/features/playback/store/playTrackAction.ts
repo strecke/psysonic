@@ -60,7 +60,8 @@ import {
   getPlayGeneration,
   setIsAudioPaused,
 } from '@/features/playback/store/engineState';
-import { clearPreloadingIds,
+import {
+  clearPreloadingIds,
   getLastGaplessSwitchTime,
 } from '@/features/playback/store/gaplessPreloadState';
 import { resetGaplessProgressTracking } from '@/features/playback/store/gaplessProgressTracking';
@@ -624,7 +625,8 @@ export function runPlayTrack(
         ),
         streamFormatSuffix: trackForPlay.suffix ?? null,
         startPaused: false,
-        startSecs: crossfadeStartSecs > 0.05 ? crossfadeStartSecs : null,
+        startSecs: initialTime > 0.05 ? initialTime :
+          (crossfadeStartSecs > 0.05 ? crossfadeStartSecs : null),
         crossfadeSecsOverride,
         outgoingFadeSecsOverride,
         manualAutodjBlend: useManualBlend ? true : null,
@@ -644,7 +646,7 @@ export function runPlayTrack(
           const durSeek = trackForPlay.duration && trackForPlay.duration > 0 ? trackForPlay.duration : null;
           const seekTo = initialTime;
           const canSeekAfterPlay =
-            seekTo > 0.05 && (durSeek == null || seekTo < durSeek - 0.05);
+            initialTime <= 0.05 && seekTo > 0.05 && (durSeek == null || seekTo < durSeek - 0.05);
           if (canSeekAfterPlay) {
             void audioSeek({ seconds: seekTo })
               .then(() => {

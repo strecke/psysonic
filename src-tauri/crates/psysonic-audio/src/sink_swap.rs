@@ -22,6 +22,8 @@ pub(super) struct LegacyStreamStartWhenArmed {
     pub app: AppHandle,
     pub duration_secs: f64,
     pub hold_paused: bool,
+    pub initial_seek_secs: Option<f64>,
+    pub initial_samples: u64,
 }
 
 /// Legacy `AudioStreamReader`: keep the sink paused until the download task arms
@@ -37,6 +39,8 @@ pub(super) fn spawn_legacy_stream_start_when_armed(args: LegacyStreamStartWhenAr
         app,
         duration_secs,
         hold_paused,
+        initial_seek_secs,
+        initial_samples,
     } = args;
     tokio::spawn(async move {
         loop {
@@ -51,7 +55,8 @@ pub(super) fn spawn_legacy_stream_start_when_armed(args: LegacyStreamStartWhenAr
         if gen_arc.load(Ordering::SeqCst) != gen {
             return;
         }
-        samples_played.store(0, Ordering::Relaxed);
+        let seek_offset = initial_seek_secs.unwrap_or(0.0);
+        samples_played.store(initial_samples, Ordering::Relaxed);
         let sink = current.lock().unwrap().sink.clone();
         if let Some(sink) = sink {
             if hold_paused {
@@ -59,9 +64,9 @@ pub(super) fn spawn_legacy_stream_start_when_armed(args: LegacyStreamStartWhenAr
                 let mut cur = current.lock().unwrap();
                 cur.play_started = None;
                 if cur.paused_at.is_none() {
-                    cur.paused_at = Some(0.0);
+                    cur.paused_at = Some(seek_offset);
                 }
-                cur.seek_offset = 0.0;
+                cur.seek_offset = seek_offset;
                 crate::app_deprintln!(
                     "[stream] legacy track-stream: buffer ready, holding paused (silent prepare)"
                 );
@@ -70,7 +75,7 @@ pub(super) fn spawn_legacy_stream_start_when_armed(args: LegacyStreamStartWhenAr
                     let mut cur = current.lock().unwrap();
                     cur.play_started = Some(Instant::now());
                     cur.paused_at = None;
-                    cur.seek_offset = 0.0;
+                    cur.seek_offset = seek_offset;
                 }
                 sink.play();
                 app.emit("audio:playing", duration_secs).ok();

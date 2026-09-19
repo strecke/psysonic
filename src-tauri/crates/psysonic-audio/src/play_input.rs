@@ -158,8 +158,20 @@ pub(super) async fn select_play_input(
     };
     let is_local = ctx.url.starts_with("psysonic-local://");
 
+    let is_active_ranged = {
+        let active = state.active_ranged_stream.lock().unwrap();
+        active.as_ref().is_some_and(|p| same_playback_target(&p.url, ctx.url))
+    };
+    if !is_active_ranged {
+        state.stream_gen.fetch_add(1, Ordering::SeqCst);
+        *state.active_ranged_stream.lock().unwrap() = None;
+    }
+
     if is_local && !stream_cache_hit && !preloaded_hit {
         return Ok(Some(open_local_file_input(&ctx, state, app)?));
+    }
+    if is_active_ranged && !stream_cache_hit && !preloaded_hit && !is_local {
+        return open_active_ranged_stream_input(&ctx, state, app);
     }
     if !stream_cache_hit && !preloaded_hit && !is_local {
         return open_ranged_or_streaming_input(&ctx, state, app).await;
@@ -235,6 +247,52 @@ fn open_local_file_input(
 /// Manual or auto-advance starts that aren't already cached: try ranged HTTP
 /// (seekable) first, fall back to a non-seekable `AudioStreamReader` if the
 /// server doesn't advertise byte-range support or a length.
+fn open_active_ranged_stream_input(
+    ctx: &PlayInputContext<'_>,
+    state: &State<'_, AudioEngine>,
+    _app: &AppHandle,
+) -> Result<Option<PlayInput>, String> {
+    let active_opt = state.active_ranged_stream.lock().unwrap().clone();
+    let Some(active) = active_opt else {
+        return Ok(None);
+    };
+
+    crate::app_deprintln!(
+        "[stream] Reusing active shared ranged stream buffer for in-track seek — total={} KB, format_hint={:?}",
+        active.total_size / 1024,
+        active.format_hint
+    );
+
+    state.stream_playback_armed.store(true, Ordering::SeqCst);
+
+    let stream_gen = state.stream_gen.load(Ordering::SeqCst);
+    let reader = RangedHttpSource {
+        buf: active.buf.clone(),
+        downloaded_to: active.downloaded_to.clone(),
+        tail_ready: active.tail_ready.clone(),
+        tail_filled_from: active.tail_filled_from.clone(),
+        total_size: active.total_size,
+        pos: 0,
+        done: active.done.clone(),
+        gen_arc: state.stream_gen.clone(),
+        gen: stream_gen,
+        on_demand: active.on_demand.clone(),
+    };
+
+    Ok(Some(PlayInput::SeekableMedia {
+        reader: Box::new(reader),
+        format_hint: active.format_hint.clone(),
+        tag: "ranged-stream-reused",
+        download_control: active.download_control.clone(),
+        superseded: Some(super::stream::GenerationGuard {
+            gen: ctx.gen,
+            gen_arc: state.generation.clone(),
+        }),
+        random_access: true,
+        mp4_probe_gate: None,
+    }))
+}
+
 async fn open_ranged_or_streaming_input(
     ctx: &PlayInputContext<'_>,
     state: &State<'_, AudioEngine>,
@@ -348,9 +406,10 @@ async fn open_ranged_or_streaming_input(
                 )
             })
             .flatten();
+        let stream_gen = state.stream_gen.fetch_add(1, Ordering::SeqCst) + 1;
         tokio::spawn(ranged_download_task(
-            ctx.gen,
-            state.generation.clone(),
+            stream_gen,
+            state.stream_gen.clone(),
             audio_http_client(state),
             app.clone(),
             ctx.duration_hint,
@@ -374,21 +433,29 @@ async fn open_ranged_or_streaming_input(
             tail_ready.clone(),
             tail_filled_from.clone(),
         ));
-        // On-demand random-access fetcher: lets seeks (Ogg bisection, end-of-
-        // stream probe, forward scrubs) pull arbitrary byte ranges over HTTP
-        // Range instead of blocking until the linear filler reaches the target.
-        // This is what makes seeking work on a still-downloading Opus/Ogg stream
-        // (previously a contained no-op) without forcing a full pre-download.
         let on_demand = Some(Arc::new(super::stream::OnDemand::new(
             audio_http_client(state),
             tokio::runtime::Handle::current(),
             ctx.url.to_string(),
             buf.clone(),
             total,
-            state.generation.clone(),
-            ctx.gen,
+            state.stream_gen.clone(),
+            stream_gen,
             http_headers.clone(),
         )));
+        *state.active_ranged_stream.lock().unwrap() = Some(crate::engine::ActiveRangedStream {
+            url: ctx.url.to_string(),
+            buf: buf.clone(),
+            downloaded_to: downloaded_to.clone(),
+            tail_ready: tail_ready.clone(),
+            tail_filled_from: tail_filled_from.clone(),
+            total_size: total,
+            done: done.clone(),
+            on_demand: on_demand.clone(),
+            download_control: Some(download_control.clone()),
+            format_hint: stream_hint.clone(),
+            http_headers: http_headers.clone(),
+        });
         let reader = RangedHttpSource {
             buf,
             downloaded_to,
@@ -397,8 +464,8 @@ async fn open_ranged_or_streaming_input(
             total_size: total,
             pos: 0,
             done,
-            gen_arc: state.generation.clone(),
-            gen: ctx.gen,
+            gen_arc: state.stream_gen.clone(),
+            gen: stream_gen,
             on_demand,
         };
         return Ok(Some(PlayInput::SeekableMedia {

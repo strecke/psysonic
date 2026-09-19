@@ -43,6 +43,22 @@ pub enum StreamThreadMsg {
     },
 }
 
+#[allow(dead_code)]
+#[derive(Clone)]
+pub(crate) struct ActiveRangedStream {
+    pub(crate) url: String,
+    pub(crate) buf: Arc<Mutex<Vec<u8>>>,
+    pub(crate) downloaded_to: Arc<std::sync::atomic::AtomicUsize>,
+    pub(crate) tail_ready: Arc<AtomicBool>,
+    pub(crate) tail_filled_from: Arc<AtomicU64>,
+    pub(crate) total_size: u64,
+    pub(crate) done: Arc<AtomicBool>,
+    pub(crate) on_demand: Option<Arc<super::stream::OnDemand>>,
+    pub(crate) download_control: Option<Arc<super::stream::StreamDownloadControl>>,
+    pub(crate) format_hint: Option<String>,
+    pub(crate) http_headers: PlaybackHttpHeaders,
+}
+
 pub struct AudioEngine {
     pub stream_handle: Arc<std::sync::Mutex<Option<Arc<rodio::MixerDeviceSink>>>>,
     /// Serializes release/open/state-commit as one output-stream transaction.
@@ -80,6 +96,8 @@ pub struct AudioEngine {
     pub(crate) stream_completed_cache: Arc<Mutex<Option<PreloadedTrack>>>,
     /// On-disk spill for completed ranged streams above `TRACK_STREAM_PROMOTE_MAX_BYTES`.
     pub(crate) stream_completed_spill: Arc<Mutex<Option<StreamCompletedSpill>>>,
+    pub(crate) stream_gen: Arc<AtomicU64>,
+    pub(crate) active_ranged_stream: Arc<Mutex<Option<ActiveRangedStream>>>,
     /// True when the currently playing source supports seeking (in-memory bytes
     /// or `RangedHttpSource`); false for the legacy non-seekable streaming
     /// fallback (`AudioStreamReader`). `audio_seek` rejects with a "not
@@ -334,6 +352,8 @@ pub fn create_engine() -> (AudioEngine, std::thread::JoinHandle<()>) {
         preloaded: Arc::new(Mutex::new(None)),
         stream_completed_cache: Arc::new(Mutex::new(None)),
         stream_completed_spill: Arc::new(Mutex::new(None)),
+        stream_gen: Arc::new(AtomicU64::new(1)),
+        active_ranged_stream: Arc::new(Mutex::new(None)),
         current_is_seekable: Arc::new(AtomicBool::new(true)),
         stream_playback_armed: Arc::new(AtomicBool::new(true)),
         crossfade_enabled: Arc::new(AtomicBool::new(false)),

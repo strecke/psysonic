@@ -632,8 +632,13 @@ pub async fn audio_play(
         if !start_paused {
             let mut cur = state.current.lock().unwrap();
             cur.play_started = None;
-            cur.paused_at = Some(0.0);
+            cur.paused_at = if did_start_seek { Some(start_secs) } else { Some(0.0) };
         }
+        let initial_samples = if did_start_seek {
+            state.samples_played.load(Ordering::Relaxed)
+        } else {
+            0
+        };
         spawn_legacy_stream_start_when_armed(LegacyStreamStartWhenArmed {
             gen,
             gen_arc: state.generation.clone(),
@@ -643,6 +648,8 @@ pub async fn audio_play(
             app: app.clone(),
             duration_secs,
             hold_paused: start_paused,
+            initial_seek_secs: if did_start_seek { Some(start_secs) } else { None },
+            initial_samples,
         });
     } else if !start_paused {
         app.emit("audio:playing", duration_secs).ok();
