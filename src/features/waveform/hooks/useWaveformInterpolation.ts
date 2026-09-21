@@ -10,6 +10,7 @@ import { drawSeekbar } from '@/features/waveform/utils/waveformSeekRenderers';
 interface Args {
   duration: number;
   isPlaying: boolean;
+  isBuffering: boolean;
   previewFreezesMainSeekbar: boolean;
   canvasRef: React.RefObject<HTMLCanvasElement | null>;
   heightsRef: React.MutableRefObject<Float32Array | null>;
@@ -30,19 +31,19 @@ interface Args {
  *  transport heartbeats, with proper anchor reset on resume. Inactive while
  *  paused, dragging, wheel-preview, or pending-committed-seek. */
 export function useWaveformInterpolation({
-  duration, isPlaying, previewFreezesMainSeekbar,
+  duration, isPlaying, isBuffering, previewFreezesMainSeekbar,
   canvasRef, heightsRef, styleRef,
   progressRef, bufferedRef, visualProgressRef, visualTargetProgressRef,
   progressAnchorRef, animStateRef, isDraggingRef,
   wheelPreviewFractionRef, wheelPreviewUntilRef, pendingCommittedSeekRef,
 }: Args) {
   useEffect(() => {
-    if (!isPlaying || previewFreezesMainSeekbar || duration <= 0 || !isFinite(duration)) return;
+    if ((!isPlaying && !isBuffering) || previewFreezesMainSeekbar || duration <= 0 || !isFinite(duration)) return;
     // This effect is torn down while paused, so `progressAnchorRef.atMs` is not refreshed.
     // On resume the first `tick` would add the entire pause duration to `elapsedSec` and
     // overshoot the playhead until the next transport heartbeat corrects it.
     const snap = getPlaybackProgressSnapshot();
-    const raw = snap.buffering || snap.currentTime < 0.005 ? 0 : snap.progress;
+    const raw = !snap.buffering && snap.currentTime < 0.005 ? 0 : snap.progress;
     progressRef.current = raw;
     progressAnchorRef.current = {
       progress: raw,
@@ -75,7 +76,12 @@ export function useWaveformInterpolation({
         return;
       }
       const snap = getPlaybackProgressSnapshot();
-      if (snap.buffering || snap.currentTime < 0.005) {
+      if (snap.buffering) {
+        progressAnchorRef.current = { progress: progressRef.current, atMs: now };
+        rafId = requestAnimationFrame(tick);
+        return;
+      }
+      if (snap.currentTime < 0.005) {
         progressRef.current = 0;
         visualTargetProgressRef.current = 0;
         visualProgressRef.current = 0;
@@ -118,5 +124,5 @@ export function useWaveformInterpolation({
       if (rafId != null) cancelAnimationFrame(rafId);
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [duration, isPlaying, previewFreezesMainSeekbar]);
+  }, [duration, isPlaying, isBuffering, previewFreezesMainSeekbar]);
 }

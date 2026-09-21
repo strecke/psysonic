@@ -324,7 +324,8 @@ export function runPlayTrack(
   const skipFromTimeSec = state.currentTime;
   const outgoingWaveformBins = state.waveformBins;
   const prevTrack = state.currentTrack;
-  if (!prevTrack || !sameQueueTrack(prevTrack, scopedTrack)) {
+  const isSameTrackReplay = Boolean(prevTrack && sameQueueTrack(prevTrack, scopedTrack));
+  if (!isSameTrackReplay) {
     setSeekFallbackTrackId(null);
   }
   const visualOnEntry = getSeekFallbackVisualTarget();
@@ -498,7 +499,7 @@ export function runPlayTrack(
         // New playback generation: the previous stream's resolved format no
         // longer applies (same-id replays would otherwise show stale data).
         resolvedStreamFormat: null,
-        waveformBins: null,
+        waveformBins: isSameTrackReplay ? state.waveformBins : null,
         ...deriveNormalizationSnapshot(trackForPlay, playNormWindow, normIdx),
         progress: initialProgress,
         buffered: 0,
@@ -526,7 +527,7 @@ export function runPlayTrack(
         currentTrack: trackForPlay,
         currentRadio: null,
         resolvedStreamFormat: null,
-        waveformBins: null,
+        waveformBins: isSameTrackReplay ? state.waveformBins : null,
         ...deriveNormalizationSnapshot(trackForPlay, playNormWindow, normIdx),
         // Only a replace rewrites the queue; navigation keeps the canonical refs.
         ...(replacing ? { queueItems: toQueueItemRefs(queueSid, scopedQueue) } : {}),

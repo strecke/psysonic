@@ -55,6 +55,7 @@ export default function WaveformSeek({ trackId }: Props) {
 
   const seek         = usePlayerStore(s => s.seek);
   const isPlaying    = usePlayerStore(s => s.isPlaying);
+  const isBuffering  = usePlayerStore(s => s.isPlaybackBuffering);
   /** Track preview pauses the main sink in Rust; `isPlaying` stays true so the bar must not extrapolate. */
   const previewFreezesMainSeekbar = usePreviewStore(s => s.previewingId != null);
   const waveformBins = usePlayerStore(s => s.waveformBins);
@@ -93,7 +94,7 @@ export default function WaveformSeek({ trackId }: Props) {
         const ageMs = Date.now() - pendingCommit.setAtMs;
         if (ageMs < SEEK_COMMIT_MIN_HOLD_MS) return;
         const matched = Math.abs(state.progress - pendingCommit.fraction) <= SEEK_COMMIT_PROGRESS_EPS;
-        const expired = ageMs > SEEK_COMMIT_GUARD_MS;
+        const expired = ageMs > (state.buffering ? 10_000 : SEEK_COMMIT_GUARD_MS);
         if (!matched && !expired) return;
         pendingCommittedSeekRef.current = null;
       }
@@ -140,18 +141,26 @@ export default function WaveformSeek({ trackId }: Props) {
     });
   }, []);
 
+  const lastDrawnTrackIdRef = useRef<string | undefined>(undefined);
+
   // Initial draw for static styles when style, track, or waveform payload changes.
   useEffect(() => {
     if (ANIMATED_STYLES.has(seekbarStyle)) return;
-    progressRef.current = 0;
-    bufferedRef.current = 0;
-    visualProgressRef.current = 0;
-    visualTargetProgressRef.current = 0;
-    // React Compiler immutability rule: intentional imperative reset on track change.
-    // eslint-disable-next-line react-hooks/immutability
-    progressAnchorRef.current = { progress: 0, atMs: performance.now() };
+    const isNewTrack = trackId !== lastDrawnTrackIdRef.current;
+    lastDrawnTrackIdRef.current = trackId;
+    if (isNewTrack) {
+      progressRef.current = 0;
+      bufferedRef.current = 0;
+      visualProgressRef.current = 0;
+      visualTargetProgressRef.current = 0;
+      // React Compiler immutability rule: intentional imperative reset on track change.
+      // eslint-disable-next-line react-hooks/immutability
+      progressAnchorRef.current = { progress: 0, atMs: performance.now() };
+    }
     const canvas = canvasRef.current;
-    if (canvas) drawSeekbar(canvas, seekbarStyle, heightsRef.current, 0, 0);
+    if (canvas) {
+      drawSeekbar(canvas, seekbarStyle, heightsRef.current, visualProgressRef.current, bufferedRef.current);
+    }
   }, [
     seekbarStyle,
     trackId,
@@ -288,7 +297,7 @@ export default function WaveformSeek({ trackId }: Props) {
   const wheelPreviewUntilRef = useRef(0);
 
   useWaveformInterpolation({
-    duration, isPlaying, previewFreezesMainSeekbar,
+    duration, isPlaying, isBuffering, previewFreezesMainSeekbar,
     canvasRef, heightsRef, styleRef,
     progressRef, bufferedRef, visualProgressRef, visualTargetProgressRef,
     progressAnchorRef, animStateRef, isDraggingRef: isDragging,
